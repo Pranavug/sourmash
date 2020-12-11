@@ -13,8 +13,9 @@ use rayon::prelude::*;
 use crate::signature::{Signature, SigsTrait};
 use crate::sketch::minhash::KmerMinHash;
 use crate::sketch::Sketch;
+use crate::HashIntoType;
 
-type HashToIdx = HashMap<u64, HashSet<usize>, BuildNoHashHasher<u64>>;
+type HashToIdx = HashMap<HashIntoType, HashSet<usize>, BuildNoHashHasher<HashIntoType>>;
 type SigCounter = counter::Counter<usize>;
 
 #[derive(Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 use std::iter::Iterator;
@@ -14,8 +14,7 @@ use crate::Error;
 
 type Color = u64;
 type Idx = u64;
-type Count = u64;
-type IdxTracker = (HashSet<Idx>, Count);
+type IdxTracker = BTreeSet<Idx>;
 type ColorToIdx = HashMap<Color, IdxTracker, BuildNoHashHasher<Color>>;
 
 #[cfg_attr(all(target_arch = "wasm32", target_vendor = "unknown"), wasm_bindgen)]
@@ -368,8 +367,7 @@ pub const VALID: [bool; 256] = {
 
 #[derive(Default)]
 pub struct Colors {
-    base: ColorToIdx,
-    composed: ColorToIdx,
+    colors: ColorToIdx,
 }
 
 impl Colors {
@@ -381,69 +379,68 @@ impl Colors {
     ///
     /// This might create a new one, or find an already existing color
     /// that contains the new_idx
+    ///
+    /// Future optimization: store a count for each color, so we can track
+    /// if there are extra colors that can be removed at the end.
+    /// (the count is decreased whenever a new color has to be created)
     pub fn update(&mut self, current_color: Option<Color>, new_idx: Idx) -> Result<Color, Error> {
         if let Some(color) = current_color {
-            if !self.base.contains_key(&color) && !self.composed.contains_key(&color) {
-                todo!("throw error, current_color must exist in order to be updated")
-            };
-
-            if let Some((idxs, mut count)) = self.base.get(&color) {
+            if let Some(idxs) = self.colors.get(&color) {
                 if idxs.contains(&new_idx) {
                     // Easy case, it already has the new_idx, so just return this color
                     Ok(color)
                 } else {
-                    // Hard case: we need to either create a new color,
+                    // We need to either create a new color,
                     // or find an existing color that have the same idxs
-                    if count == 0 {
-                        // if count == 0, we reuse this color
-                        count += 1;
-                        Ok(color)
-                    } else if count == 1 {
-                        // if count == 1, we 'upgrade' this color
-                        //   -> move to multi?
-                        count -= 1;
-                        let mut idxs = idxs.clone();
-                        idxs.insert(new_idx);
-                        let new_color = Colors::compute_color(&idxs);
-                        self.composed.insert(new_color, (idxs, 1));
-                        Ok(new_color)
-                    } else {
-                        todo!("find existing color with same idxs in composed")
-                    }
+                    let mut idxs = idxs.clone();
+                    idxs.insert(new_idx);
+                    let new_color = Colors::compute_color(&idxs);
+                    self.colors.insert(new_color, idxs);
+                    Ok(new_color)
                 }
             } else {
-                todo!("check composed")
+                todo!("throw error, current_color must exist in order to be updated")
             }
         } else {
             let mut idxs = IdxTracker::default();
-            idxs.0.insert(new_idx);
-            idxs.1 += 1;
+            idxs.insert(new_idx);
 
-            // FIXME: actually find next available color
-            let new_color = new_idx;
+            let new_color = Colors::compute_color(&idxs);
 
-            self.base.insert(new_color, idxs);
+            self.colors.insert(new_color, idxs);
             Ok(new_color)
         }
     }
 
-    fn compute_color(idxs: &HashSet<Idx>) -> Color {
+    fn compute_color(idxs: &BTreeSet<Idx>) -> Color {
         let s = BuildHasherDefault::<twox_hash::Xxh3Hash128>::default();
         let mut hasher = s.build_hasher();
-        let mut values: Vec<_> = idxs.iter().collect();
-        values.sort_unstable();
-        values.hash(&mut hasher);
+        idxs.hash(&mut hasher);
         hasher.finish()
     }
 
     pub fn len(&self) -> usize {
-        self.base.values().filter(|v| v.1 != 0).count() + self.composed.len()
+        self.colors.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.base.is_empty() && self.composed.is_empty()
+        self.colors.is_empty()
+    }
+
+    pub fn contains(&self, color: Color, idx: Idx) -> bool {
+        if let Some(idxs) = self.colors.get(&color) {
+            idxs.contains(&idx)
+        } else {
+            false
+        }
+    }
+
+    pub fn indices(&self, color: Color) -> impl Iterator + '_ {
+        // TODO: what if color is not present?
+        self.colors.get(&color).unwrap().iter()
     }
 }
+
 #[cfg(test)]
 mod test {
     use super::*;
