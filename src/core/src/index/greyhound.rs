@@ -25,7 +25,6 @@ pub struct RevIndex {
     template: Sketch,
 }
 
-#[cfg(feature = "parallel")]
 impl RevIndex {
     pub fn load<P: AsRef<Path>>(
         index_path: P,
@@ -44,6 +43,7 @@ impl RevIndex {
         Ok(revindex)
     }
 
+    #[cfg(feature = "parallel")]
     pub fn new(
         search_sigs: &[PathBuf],
         template: &Sketch,
@@ -334,4 +334,12 @@ impl GatherResult {
     pub fn get_match(&self) -> String {
         self.match_.clone()
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn greyhound_new() {}
 }

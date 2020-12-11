@@ -1,13 +1,22 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 use std::iter::Iterator;
 use std::str;
+
+use nohash_hasher::BuildNoHashHasher;
 
 use once_cell::sync::Lazy;
 #[cfg(all(target_arch = "wasm32", target_vendor = "unknown"))]
 use wasm_bindgen::prelude::*;
 
 use crate::Error;
+
+type Color = u64;
+type Idx = u64;
+type Count = u64;
+type IdxTracker = (HashSet<Idx>, Count);
+type ColorToIdx = HashMap<Color, IdxTracker, BuildNoHashHasher<Color>>;
 
 #[cfg_attr(all(target_arch = "wasm32", target_vendor = "unknown"), wasm_bindgen)]
 #[allow(non_camel_case_types)]
@@ -356,3 +365,104 @@ pub const VALID: [bool; 256] = {
     lookup[b'T' as usize] = true;
     lookup
 };
+
+#[derive(Default)]
+pub struct Colors {
+    base: ColorToIdx,
+    composed: ColorToIdx,
+}
+
+impl Colors {
+    pub fn new() -> Colors {
+        Default::default()
+    }
+
+    /// Given a color and a new idx, return an updated color
+    ///
+    /// This might create a new one, or find an already existing color
+    /// that contains the new_idx
+    pub fn update(&mut self, current_color: Option<Color>, new_idx: Idx) -> Result<Color, Error> {
+        if let Some(color) = current_color {
+            if !self.base.contains_key(&color) && !self.composed.contains_key(&color) {
+                todo!("throw error, current_color must exist in order to be updated")
+            };
+
+            if let Some((idxs, mut count)) = self.base.get(&color) {
+                if idxs.contains(&new_idx) {
+                    // Easy case, it already has the new_idx, so just return this color
+                    Ok(color)
+                } else {
+                    // Hard case: we need to either create a new color,
+                    // or find an existing color that have the same idxs
+                    if count == 0 {
+                        // if count == 0, we reuse this color
+                        count += 1;
+                        Ok(color)
+                    } else if count == 1 {
+                        // if count == 1, we 'upgrade' this color
+                        //   -> move to multi?
+                        count -= 1;
+                        let mut idxs = idxs.clone();
+                        idxs.insert(new_idx);
+                        let new_color = Colors::compute_color(&idxs);
+                        self.composed.insert(new_color, (idxs, 1));
+                        Ok(new_color)
+                    } else {
+                        todo!("find existing color with same idxs in composed")
+                    }
+                }
+            } else {
+                todo!("check composed")
+            }
+        } else {
+            let mut idxs = IdxTracker::default();
+            idxs.0.insert(new_idx);
+            idxs.1 += 1;
+
+            // FIXME: actually find next available color
+            let new_color = new_idx;
+
+            self.base.insert(new_color, idxs);
+            Ok(new_color)
+        }
+    }
+
+    fn compute_color(idxs: &HashSet<Idx>) -> Color {
+        let s = BuildHasherDefault::<twox_hash::Xxh3Hash128>::default();
+        let mut hasher = s.build_hasher();
+        let mut values: Vec<_> = idxs.iter().collect();
+        values.sort_unstable();
+        values.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    pub fn len(&self) -> usize {
+        self.base.values().filter(|v| v.1 != 0).count() + self.composed.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.base.is_empty() && self.composed.is_empty()
+    }
+}
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn colors_update() {
+        let mut colors = Colors::new();
+
+        let color = colors.update(None, 1).unwrap();
+        assert_eq!(colors.len(), 1);
+
+        dbg!("update");
+        let new_color = colors.update(Some(color), 1).unwrap();
+        assert_eq!(colors.len(), 1);
+        assert_eq!(color, new_color);
+
+        dbg!("upgrade");
+        let new_color = colors.update(Some(color), 2).unwrap();
+        assert_eq!(colors.len(), 2);
+        assert_ne!(color, new_color);
+    }
+}
