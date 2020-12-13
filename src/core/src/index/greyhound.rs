@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -179,14 +180,21 @@ impl RevIndex {
                             (a, b)
                         };
 
-                    small_hashes.into_iter().for_each(|(hash, color)| {
-                        let entry = large_hashes.entry(hash).or_insert_with(|| color);
-                        if *entry != color {
-                            let ids: Vec<_> = small_colors.indices(&color).cloned().collect();
-                            let new_color =
-                                large_colors.update(Some(*entry), ids.as_slice()).unwrap();
-                            *entry = new_color;
-                        }
+                    small_hashes.into_iter().for_each(|(hash, small_color)| {
+                        match large_hashes.entry(hash) {
+                            Entry::Occupied(mut color) => {
+                                let old_color = color.get();
+                                if *old_color != small_color {
+                                    let ids: Vec<_> =
+                                        small_colors.indices(&small_color).cloned().collect();
+                                    let new_color = large_colors
+                                        .update(Some(*old_color), ids.as_slice())
+                                        .unwrap();
+                                    *color.get_mut() = new_color;
+                                }
+                            }
+                            Entry::Vacant(old_color) => unimplemented!(),
+                        };
                     });
 
                     (large_hashes, large_colors)
