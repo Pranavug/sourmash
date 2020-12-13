@@ -180,9 +180,18 @@ impl RevIndex {
                         };
 
                     small_hashes.into_iter().for_each(|(hash, color)| {
-                        let entry = large_hashes.entry(hash).or_insert_with(|| color);
+                        let ids: Vec<_> = small_colors.indices(&color).cloned().collect();
+
+                        let entry = large_hashes.entry(hash).or_insert_with(|| {
+                            // In this case, the hash was not present yet.
+                            // we need to create the same color from small_colors
+                            // into large_colors.
+                            let new_color = large_colors.update(None, ids.as_slice()).unwrap();
+                            assert_eq!(new_color, color);
+                            new_color
+                        });
+
                         if *entry != color {
-                            let ids: Vec<_> = small_colors.indices(&color).cloned().collect();
                             let new_color =
                                 large_colors.update(Some(*entry), ids.as_slice()).unwrap();
                             *entry = new_color;
