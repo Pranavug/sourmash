@@ -10,20 +10,22 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
+use crate::encodings::{Color, Colors, Idx};
 use crate::signature::{Signature, SigsTrait};
 use crate::sketch::minhash::KmerMinHash;
 use crate::sketch::Sketch;
 use crate::HashIntoType;
 
-type HashToIdx = HashMap<HashIntoType, HashSet<usize>, BuildNoHashHasher<HashIntoType>>;
-type SigCounter = counter::Counter<usize>;
+type HashToColor = HashMap<HashIntoType, Color, BuildNoHashHasher<HashIntoType>>;
+type SigCounter = counter::Counter<Idx>;
 
 #[derive(Serialize, Deserialize)]
 pub struct RevIndex {
-    hash_to_idx: HashToIdx,
+    hash_to_color: HashToColor,
     sig_files: Vec<PathBuf>,
     ref_sigs: Option<Vec<Signature>>,
     template: Sketch,
+    colors: Colors,
 }
 
 impl RevIndex {
@@ -38,13 +40,14 @@ impl RevIndex {
         if let Some(qs) = queries {
             for q in qs {
                 let hashes: HashSet<u64> = q.iter_mins().cloned().collect();
-                revindex.hash_to_idx.retain(|hash, _| hashes.contains(hash));
+                revindex
+                    .hash_to_color
+                    .retain(|hash, _| hashes.contains(hash));
             }
         }
         Ok(revindex)
     }
 
-    #[cfg(feature = "parallel")]
     pub fn new(
         search_sigs: &[PathBuf],
         template: &Sketch,
@@ -52,8 +55,6 @@ impl RevIndex {
         queries: Option<&[KmerMinHash]>,
         keep_sigs: bool,
     ) -> RevIndex {
-        let processed_sigs = AtomicUsize::new(0);
-
         // If threshold is zero, let's merge all queries and save time later
         let merged_query = if let Some(qs) = queries {
             if threshold == 0 {
@@ -69,7 +70,143 @@ impl RevIndex {
             None
         };
 
-        let hash_to_idx = search_sigs
+        let (hash_to_color, colors) =
+            RevIndex::hash_to_color(&search_sigs, queries, merged_query, threshold, template);
+
+        // TODO: build this together with hash_to_idx?
+        let ref_sigs = if keep_sigs {
+            Some(
+                search_sigs
+                    .par_iter()
+                    .map(|ref_path| {
+                        Signature::from_path(&ref_path)
+                            .unwrap_or_else(|_| panic!("Error processing {:?}", ref_path))
+                            .swap_remove(0)
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
+        RevIndex {
+            hash_to_color,
+            sig_files: search_sigs.into(),
+            ref_sigs,
+            template: template.clone(),
+            colors,
+        }
+    }
+
+    #[cfg(feature = "parallel")]
+    fn hash_to_color(
+        search_sigs: &[PathBuf],
+        queries: Option<&[KmerMinHash]>,
+        merged_query: Option<KmerMinHash>,
+        threshold: usize,
+        template: &Sketch,
+    ) -> (HashToColor, Colors) {
+        let processed_sigs = AtomicUsize::new(0);
+
+        let (hashes, mut colors) = search_sigs
+            .par_iter()
+            .enumerate()
+            .filter_map(|(dataset_id, filename)| {
+                let i = processed_sigs.fetch_add(1, Ordering::SeqCst);
+                if i % 1000 == 0 {
+                    info!("Processed {} reference sigs", i);
+                }
+
+                let mut search_mh = None;
+                let search_sig = Signature::from_path(&filename)
+                    .unwrap_or_else(|_| panic!("Error processing {:?}", filename))
+                    .swap_remove(0);
+                if let Some(sketch) = search_sig.select_sketch(&template) {
+                    if let Sketch::MinHash(mh) = sketch {
+                        search_mh = Some(mh);
+                    }
+                }
+                let search_mh = search_mh.unwrap();
+
+                let mut hash_to_color = HashToColor::with_hasher(BuildNoHashHasher::default());
+                let mut colors = Colors::default();
+                let color = colors.update(None, &[dataset_id as Idx]).unwrap();
+
+                let mut add_to = |matched_hashes: Vec<u64>, intersection| {
+                    if !matched_hashes.is_empty() || intersection > threshold as u64 {
+                        matched_hashes.into_iter().for_each(|hash| {
+                            hash_to_color.insert(hash, color);
+                        });
+                    }
+                };
+
+                if let Some(qs) = queries {
+                    if let Some(ref merged) = merged_query {
+                        let (matched_hashes, intersection) =
+                            merged.intersection(search_mh).unwrap();
+                        add_to(matched_hashes, intersection);
+                    } else {
+                        for query in qs {
+                            let (matched_hashes, intersection) =
+                                query.intersection(search_mh).unwrap();
+                            add_to(matched_hashes, intersection);
+                        }
+                    }
+                } else {
+                    let matched = search_mh.mins();
+                    let size = matched.len() as u64;
+                    add_to(matched, size);
+                };
+
+                if hash_to_color.is_empty() {
+                    None
+                } else {
+                    Some((hash_to_color, colors))
+                }
+            })
+            .reduce(
+                || {
+                    (
+                        HashToColor::with_hasher(BuildNoHashHasher::default()),
+                        Colors::default(),
+                    )
+                },
+                |a, b| {
+                    let ((small_hashes, small_colors), (mut large_hashes, mut large_colors)) =
+                        if a.0.len() > b.0.len() {
+                            (b, a)
+                        } else {
+                            (a, b)
+                        };
+
+                    small_hashes.into_iter().for_each(|(hash, color)| {
+                        let entry = large_hashes.entry(hash).or_insert_with(|| color);
+                        if *entry != color {
+                            let ids: Vec<_> = small_colors.indices(&color).cloned().collect();
+                            let new_color =
+                                large_colors.update(Some(*entry), ids.as_slice()).unwrap();
+                            *entry = new_color;
+                        }
+                    });
+
+                    (large_hashes, large_colors)
+                },
+            );
+
+        // TODO: also try this inside reduce. It might save memory (since it
+        // doesn't accumulate unused colors), but take longer to run (since it
+        // is executed more frequently)
+        let used_colors: HashSet<_> = hashes.values().collect();
+        colors.retain(|color, _| used_colors.contains(color));
+
+        (hashes, colors)
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    fn hash_to_color(search_sigs: &[PathBuf], threshold: usize) -> HashToColor {
+        let processed_sigs = AtomicUsize::new(0);
+
+        let hash_to_color = search_sigs
             .par_iter()
             .enumerate()
             .filter_map(|(dataset_id, filename)| {
@@ -139,29 +276,7 @@ impl RevIndex {
                     large
                 },
             );
-
-        // TODO: build this together with hash_to_idx?
-        let ref_sigs = if keep_sigs {
-            Some(
-                search_sigs
-                    .par_iter()
-                    .map(|ref_path| {
-                        Signature::from_path(&ref_path)
-                            .unwrap_or_else(|_| panic!("Error processing {:?}", ref_path))
-                            .swap_remove(0)
-                    })
-                    .collect(),
-            )
-        } else {
-            None
-        };
-
-        RevIndex {
-            hash_to_idx,
-            sig_files: search_sigs.into(),
-            ref_sigs,
-            template: template.clone(),
-        }
+        hash_to_color
     }
 
     pub fn search(
@@ -177,7 +292,7 @@ impl RevIndex {
 
         for (dataset_id, size) in counter.most_common() {
             if size >= threshold {
-                matches.push(self.sig_files[dataset_id].to_str().unwrap().into());
+                matches.push(self.sig_files[dataset_id as usize].to_str().unwrap().into());
             } else {
                 break;
             };
@@ -198,10 +313,10 @@ impl RevIndex {
             let (dataset_id, size) = counter.most_common()[0];
             match_size = if size >= threshold { size } else { break };
 
-            let match_path = &self.sig_files[dataset_id];
+            let match_path = &self.sig_files[dataset_id as usize];
             let ref_match;
             let match_sig = if let Some(refsigs) = &self.ref_sigs {
-                &refsigs[dataset_id]
+                &refsigs[dataset_id as usize]
             } else {
                 // TODO: remove swap_remove
                 ref_match = Signature::from_path(&match_path)?.swap_remove(0);
@@ -262,8 +377,8 @@ impl RevIndex {
             // Prepare counter for finding the next match by decrementing
             // all hashes found in the current match in other datasets
             for hash in match_mh.iter_mins() {
-                if let Some(dataset_ids) = self.hash_to_idx.get(hash) {
-                    for dataset in dataset_ids {
+                if let Some(color) = self.hash_to_color.get(hash) {
+                    for dataset in self.colors.indices(color) {
                         counter.entry(*dataset).and_modify(|e| {
                             if *e > 0 {
                                 *e -= 1
@@ -280,17 +395,16 @@ impl RevIndex {
     pub fn counter_for_query(&self, query: &KmerMinHash) -> SigCounter {
         query
             .iter_mins()
-            .filter_map(|h| self.hash_to_idx.get(h))
-            .flatten()
+            .filter_map(|hash| self.hash_to_color.get(hash))
+            .flat_map(|color| self.colors.indices(color))
             .cloned()
             .collect()
     }
 
     pub fn counter(&self) -> SigCounter {
-        self.hash_to_idx
+        self.hash_to_color
             .iter()
-            .map(|(_, ids)| ids)
-            .flatten()
+            .flat_map(|(_, color)| self.colors.indices(color).into_iter())
             .cloned()
             .collect()
     }

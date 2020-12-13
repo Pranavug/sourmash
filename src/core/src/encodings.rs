@@ -1,4 +1,5 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashMap};
 use std::convert::TryFrom;
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 use std::iter::Iterator;
@@ -12,8 +13,8 @@ use wasm_bindgen::prelude::*;
 
 use crate::Error;
 
-type Color = u64;
-type Idx = u64;
+pub type Color = u64;
+pub type Idx = u64;
 type IdxTracker = BTreeSet<Idx>;
 type ColorToIdx = HashMap<Color, IdxTracker, BuildNoHashHasher<Color>>;
 
@@ -365,7 +366,7 @@ pub const VALID: [bool; 256] = {
     lookup
 };
 
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Colors {
     colors: ColorToIdx,
 }
@@ -383,32 +384,37 @@ impl Colors {
     /// Future optimization: store a count for each color, so we can track
     /// if there are extra colors that can be removed at the end.
     /// (the count is decreased whenever a new color has to be created)
-    pub fn update(&mut self, current_color: Option<Color>, new_idx: Idx) -> Result<Color, Error> {
+    pub fn update(
+        &mut self,
+        current_color: Option<Color>,
+        new_idxs: &[Idx],
+    ) -> Result<Color, Error> {
+        let insert_new_color = |mut idxs: IdxTracker, colors: &mut ColorToIdx, new_idxs: &[Idx]| {
+            for new_idx in new_idxs {
+                idxs.insert(*new_idx);
+            }
+            let new_color = Colors::compute_color(&idxs);
+            colors.insert(new_color, idxs);
+            Ok(new_color)
+        };
+
         if let Some(color) = current_color {
             if let Some(idxs) = self.colors.get(&color) {
-                if idxs.contains(&new_idx) {
-                    // Easy case, it already has the new_idx, so just return this color
+                if new_idxs.iter().all(|new_idx| idxs.contains(&new_idx)) {
+                    // Easy case, it already has all the new_idxs, so just return this color
                     Ok(color)
                 } else {
                     // We need to either create a new color,
                     // or find an existing color that have the same idxs
-                    let mut idxs = idxs.clone();
-                    idxs.insert(new_idx);
-                    let new_color = Colors::compute_color(&idxs);
-                    self.colors.insert(new_color, idxs);
-                    Ok(new_color)
+                    let idxs = idxs.clone();
+                    insert_new_color(idxs, &mut self.colors, new_idxs)
                 }
             } else {
                 todo!("throw error, current_color must exist in order to be updated")
             }
         } else {
-            let mut idxs = IdxTracker::default();
-            idxs.insert(new_idx);
-
-            let new_color = Colors::compute_color(&idxs);
-
-            self.colors.insert(new_color, idxs);
-            Ok(new_color)
+            let idxs = IdxTracker::default();
+            insert_new_color(idxs, &mut self.colors, new_idxs)
         }
     }
 
@@ -435,9 +441,30 @@ impl Colors {
         }
     }
 
-    pub fn indices(&self, color: Color) -> impl Iterator + '_ {
+    pub fn indices(&self, color: &Color) -> Indices {
         // TODO: what if color is not present?
-        self.colors.get(&color).unwrap().iter()
+        Indices {
+            iter: self.colors.get(&color).unwrap().iter(),
+        }
+    }
+
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&Color, &mut IdxTracker) -> bool,
+    {
+        self.colors.retain(f)
+    }
+}
+
+pub struct Indices<'a> {
+    iter: std::collections::btree_set::Iter<'a, Idx>,
+}
+
+impl<'a> Iterator for Indices<'a> {
+    type Item = &'a Idx;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
     }
 }
 
@@ -449,16 +476,16 @@ mod test {
     fn colors_update() {
         let mut colors = Colors::new();
 
-        let color = colors.update(None, 1).unwrap();
+        let color = colors.update(None, &[1]).unwrap();
         assert_eq!(colors.len(), 1);
 
         dbg!("update");
-        let new_color = colors.update(Some(color), 1).unwrap();
+        let new_color = colors.update(Some(color), &[1]).unwrap();
         assert_eq!(colors.len(), 1);
         assert_eq!(color, new_color);
 
         dbg!("upgrade");
-        let new_color = colors.update(Some(color), 2).unwrap();
+        let new_color = colors.update(Some(color), &[2]).unwrap();
         assert_eq!(colors.len(), 2);
         assert_ne!(color, new_color);
     }
