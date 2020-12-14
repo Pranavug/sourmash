@@ -198,15 +198,16 @@ impl RevIndex {
                         }
                     });
 
+                    // Doing this outside reduce (at the end) uses more memory (since it
+                    // accumulates unused colors), but doesn't iterate over all
+                    // hashes/colors so frequently. For now keeping it here to
+                    // save memory
+                    let used_colors: HashSet<_> = large_hashes.values().collect();
+                    large_colors.retain(|color, _| used_colors.contains(color));
+
                     (large_hashes, large_colors)
                 },
             );
-
-        // TODO: also try this inside reduce. It might save memory (since it
-        // doesn't accumulate unused colors), but take longer to run (since it
-        // is executed more frequently)
-        let used_colors: HashSet<_> = hashes.values().collect();
-        colors.retain(|color, _| used_colors.contains(color));
 
         (hashes, colors)
     }
