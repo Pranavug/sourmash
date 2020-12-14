@@ -46,6 +46,7 @@ primal-check = "0.2.3"
 thiserror = "1.0"
 typed-builder = "0.7.0"
 twox-hash = "1.6.0"
+vec-collections = { version = "0.3.3", git = "https://github.com/luizirber/vec-collections", branch = "pub_iter" }
 
 [target.'cfg(all(target_arch = "wasm32", target_vendor="unknown"))'.dependencies.wasm-bindgen]
 version = "0.2.62"

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 use std::iter::Iterator;
@@ -15,7 +15,7 @@ use crate::Error;
 
 pub type Color = u64;
 pub type Idx = u64;
-type IdxTracker = BTreeSet<Idx>;
+type IdxTracker = vec_collections::VecSet<[Idx; 1]>;
 type ColorToIdx = HashMap<Color, IdxTracker, BuildNoHashHasher<Color>>;
 
 #[cfg_attr(all(target_arch = "wasm32", target_vendor = "unknown"), wasm_bindgen)]
@@ -418,7 +418,7 @@ impl Colors {
         }
     }
 
-    fn compute_color(idxs: &BTreeSet<Idx>) -> Color {
+    fn compute_color(idxs: &IdxTracker) -> Color {
         let s = BuildHasherDefault::<twox_hash::Xxh3Hash128>::default();
         let mut hasher = s.build_hasher();
         idxs.hash(&mut hasher);
@@ -457,7 +457,7 @@ impl Colors {
 }
 
 pub struct Indices<'a> {
-    iter: std::collections::btree_set::Iter<'a, Idx>,
+    iter: vec_collections::VecSetIter<core::slice::Iter<'a, Idx>>,
 }
 
 impl<'a> Iterator for Indices<'a> {
