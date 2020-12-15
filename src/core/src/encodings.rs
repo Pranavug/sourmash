@@ -15,7 +15,7 @@ use crate::Error;
 
 pub type Color = u64;
 pub type Idx = u64;
-type IdxTracker = vec_collections::VecSet<[Idx; 1]>;
+type IdxTracker = vec_collections::VecSet<[Idx; 4]>;
 type ColorToIdx = HashMap<Color, IdxTracker, BuildNoHashHasher<Color>>;
 
 #[cfg_attr(all(target_arch = "wasm32", target_vendor = "unknown"), wasm_bindgen)]
