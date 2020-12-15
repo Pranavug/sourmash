@@ -410,7 +410,7 @@ impl Colors {
                     insert_new_color(idxs, &mut self.colors, new_idxs)
                 }
             } else {
-                todo!("throw error, current_color must exist in order to be updated")
+                unimplemented!("throw error, current_color must exist in order to be updated")
             }
         } else {
             let idxs = IdxTracker::default();
