@@ -24,7 +24,10 @@ type SigCounter = counter::Counter<Idx>;
 pub struct RevIndex {
     hash_to_color: HashToColor,
     sig_files: Vec<PathBuf>,
+
+    #[serde(skip)]
     ref_sigs: Option<Vec<Signature>>,
+
     template: Sketch,
     colors: Colors,
 }
@@ -34,18 +37,42 @@ impl RevIndex {
         index_path: P,
         queries: Option<&[KmerMinHash]>,
     ) -> Result<RevIndex, Box<dyn std::error::Error>> {
-        // TODO: avoid loading full revindex if query != None
         let (rdr, _) = niffler::from_path(index_path)?;
-        let mut revindex: RevIndex = serde_json::from_reader(rdr)?;
-
-        if let Some(qs) = queries {
-            for q in qs {
-                let hashes: HashSet<u64> = q.iter_mins().cloned().collect();
-                revindex
-                    .hash_to_color
-                    .retain(|hash, _| hashes.contains(hash));
+        let revindex = if let Some(qs) = queries {
+            // TODO: avoid loading full revindex if query != None
+            /*
+            struct PartialRevIndex<T> {
+                hashes_to_keep: Option<HashSet<HashIntoType>>,
+                marker: PhantomData<fn() -> T>,
             }
-        }
+
+            impl<T> PartialRevIndex<T> {
+                pub fn new(hashes_to_keep: HashSet<u64>) -> Self {
+                    PartialRevIndex {
+                        hashes_to_keep: Some(hashes_to_keep),
+                        marker: PhantomData,
+                    }
+                }
+            }
+            */
+
+            let mut hashes: HashSet<u64> = HashSet::new();
+            for q in qs {
+                hashes.extend(q.iter_mins());
+            }
+
+            //let mut revindex: RevIndex = PartialRevIndex::new(hashes).deserialize(&rdr).unwrap();
+
+            let mut revindex: RevIndex = serde_json::from_reader(rdr)?;
+            revindex
+                .hash_to_color
+                .retain(|hash, _| hashes.contains(hash));
+            revindex
+        } else {
+            // Load the full revindex
+            serde_json::from_reader(rdr)?
+        };
+
         Ok(revindex)
     }
 
