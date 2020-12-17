@@ -142,13 +142,13 @@ class LinearIndex(Index):
         self._signatures.append(node)
 
     def save(self, path):
-        from .signature import save_signatures
+        from ..signature import save_signatures
         with open(path, 'wt') as fp:
             save_signatures(self.signatures(), fp)
 
     @classmethod
     def load(cls, location):
-        from .signature import load_signatures
+        from ..signature import load_signatures
         si = load_signatures(location, do_raise=True)
 
         lidx = LinearIndex(si, filename=location)
