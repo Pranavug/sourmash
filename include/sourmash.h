@@ -52,6 +52,8 @@ typedef struct SourmashKmerMinHash SourmashKmerMinHash;
 
 typedef struct SourmashNodegraph SourmashNodegraph;
 
+typedef struct SourmashRevIndex SourmashRevIndex;
+
 typedef struct SourmashSignature SourmashSignature;
 
 /**
@@ -198,6 +200,16 @@ SourmashHyperLogLog *hll_from_buffer(const char *ptr, uintptr_t insize);
 void hll_save(const SourmashHyperLogLog *ptr, const char *filename);
 
 const uint8_t *hll_to_buffer(const SourmashHyperLogLog *ptr, uintptr_t *size);
+
+SourmashRevIndex *revindex_new(const SourmashStr *const *search_sigs_ptr,
+                               uintptr_t insigs,
+                               const SourmashKmerMinHash *template_ptr,
+                               uintptr_t threshold,
+                               const SourmashKmerMinHash *const *queries_ptr,
+                               uintptr_t inqueries,
+                               bool keep_sigs);
+
+void revindex_free(SourmashRevIndex *ptr);
 
 SourmashKmerMinHash *kmerminhash_new(uint64_t scaled,
                                      uint32_t k,
