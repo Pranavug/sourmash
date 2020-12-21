@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cfg_if::cfg_if;
 use getset::{CopyGetters, Getters, Setters};
-use log::info;
+use log::{debug, info};
 use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +15,7 @@ use crate::encodings::{Color, Colors, Idx};
 use crate::signature::{Signature, SigsTrait};
 use crate::sketch::minhash::KmerMinHash;
 use crate::sketch::Sketch;
+use crate::Error;
 use crate::HashIntoType;
 
 type HashToColor = HashMap<HashIntoType, Color, BuildNoHashHasher<HashIntoType>>;
@@ -423,6 +424,89 @@ impl RevIndex {
 
     pub fn template(&self) -> Sketch {
         self.template.clone()
+    }
+    // TODO: mh should be a sketch, or even a sig...
+    pub(crate) fn find_signatures(
+        &self,
+        mh: &KmerMinHash,
+        threshold: f64,
+        containment: bool,
+        _ignore_scaled: bool,
+    ) -> Result<Vec<(f64, Signature, String)>, Error> {
+        /*
+        let template_mh = None;
+        if let Sketch::MinHash(mh) = self.template {
+            template_mh = Some(mh);
+        };
+        // TODO: throw error
+        let template_mh = template_mh.unwrap();
+
+        let tmp_mh;
+        let mh = if template_mh.scaled() > mh.scaled() {
+            // TODO: proper error here
+            tmp_mh = mh.downsample_scaled(self.scaled)?;
+            &tmp_mh
+        } else {
+            mh
+        };
+
+                if self.scaled < mh.scaled() && !ignore_scaled {
+                        return Err(LcaDBError::ScaledMismatchError {
+                                db: self.scaled,
+                                query: mh.scaled(),
+                        }
+                        .into());
+                }
+        */
+
+        // TODO: proper threshold calculation
+        let threshold: usize = (threshold * (mh.scaled() as f64)) as _;
+
+        let counter = self.counter_for_query(&mh);
+
+        debug!(
+            "number of matching signatures for hashes: {}",
+            counter.len()
+        );
+
+        let mut results = vec![];
+        for (dataset_id, size) in counter.most_common() {
+            let match_size = if size >= threshold { size } else { break };
+
+            let match_path = &self.sig_files[dataset_id as usize];
+            let ref_match;
+            let match_sig = if let Some(refsigs) = &self.ref_sigs {
+                &refsigs[dataset_id as usize]
+            } else {
+                // TODO: remove swap_remove
+                ref_match = Signature::from_path(&match_path)?.swap_remove(0);
+                &ref_match
+            };
+
+            let mut match_mh = None;
+            if let Some(sketch) = match_sig.select_sketch(&self.template) {
+                if let Sketch::MinHash(mh) = sketch {
+                    match_mh = Some(mh);
+                }
+            }
+            let match_mh = match_mh.unwrap();
+
+            if size >= threshold {
+                let score = if containment {
+                    size as f64 / mh.size() as f64
+                } else {
+                    size as f64 / (mh.size() + match_size - size) as f64
+                };
+                let filename = match_path.to_str().unwrap().into();
+                let mut sig = match_sig.clone();
+                sig.reset_sketches();
+                sig.push(Sketch::MinHash(match_mh.clone()));
+                results.push((score, sig, filename));
+            } else {
+                break;
+            };
+        }
+        Ok(results)
     }
 }
 

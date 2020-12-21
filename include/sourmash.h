@@ -54,6 +54,8 @@ typedef struct SourmashNodegraph SourmashNodegraph;
 
 typedef struct SourmashRevIndex SourmashRevIndex;
 
+typedef struct SourmashSearchResult SourmashSearchResult;
+
 typedef struct SourmashSignature SourmashSignature;
 
 /**
@@ -201,6 +203,14 @@ void hll_save(const SourmashHyperLogLog *ptr, const char *filename);
 
 const uint8_t *hll_to_buffer(const SourmashHyperLogLog *ptr, uintptr_t *size);
 
+void searchresult_free(SourmashSearchResult *ptr);
+
+double searchresult_score(const SourmashSearchResult *ptr);
+
+SourmashStr searchresult_filename(const SourmashSearchResult *ptr);
+
+SourmashSignature *searchresult_signature(const SourmashSearchResult *ptr);
+
 SourmashRevIndex *revindex_new(const SourmashStr *const *search_sigs_ptr,
                                uintptr_t insigs,
                                const SourmashKmerMinHash *template_ptr,
@@ -210,6 +220,19 @@ SourmashRevIndex *revindex_new(const SourmashStr *const *search_sigs_ptr,
                                bool keep_sigs);
 
 void revindex_free(SourmashRevIndex *ptr);
+
+const SourmashSearchResult *const *revindex_search(const SourmashRevIndex *ptr,
+                                                   const SourmashSignature *sig_ptr,
+                                                   double threshold,
+                                                   bool do_containment,
+                                                   bool _ignore_abundance,
+                                                   uintptr_t *size);
+
+const SourmashSearchResult *revindex_gather(const SourmashRevIndex *ptr,
+                                            const SourmashSignature *sig_ptr,
+                                            double threshold,
+                                            bool do_containment,
+                                            bool _ignore_abundance);
 
 SourmashKmerMinHash *kmerminhash_new(uint64_t scaled,
                                      uint32_t k,
