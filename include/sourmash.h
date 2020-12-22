@@ -228,11 +228,14 @@ const SourmashSearchResult *const *revindex_search(const SourmashRevIndex *ptr,
                                                    bool _ignore_abundance,
                                                    uintptr_t *size);
 
-const SourmashSearchResult *revindex_gather(const SourmashRevIndex *ptr,
-                                            const SourmashSignature *sig_ptr,
-                                            double threshold,
-                                            bool do_containment,
-                                            bool _ignore_abundance);
+const SourmashSearchResult *const *revindex_gather(const SourmashRevIndex *ptr,
+                                                   const SourmashSignature *sig_ptr,
+                                                   double threshold,
+                                                   bool _do_containment,
+                                                   bool _ignore_abundance,
+                                                   uintptr_t *size);
+
+uint64_t revindex_scaled(const SourmashRevIndex *ptr);
 
 SourmashKmerMinHash *kmerminhash_new(uint64_t scaled,
                                      uint32_t k,

@@ -446,7 +446,7 @@ def test_revindex_gather():
     ss47 = sourmash.load_one_signature(sig47)
     ss63 = sourmash.load_one_signature(sig63)
 
-    lidx = RevIndex()
+    lidx = RevIndex([sig2, sig47, sig63], template=ss2.minhash)
     lidx.insert(ss2)
     lidx.insert(ss47)
     lidx.insert(ss63)
@@ -460,5 +460,5 @@ def test_revindex_gather():
     assert len(matches) == 2
     assert matches[0][0] == 1.0
     assert matches[0][1] == ss47
-    assert round(matches[1][0], 2) == 0.49
+    assert round(matches[1][0], 2) == 0.0
     assert matches[1][1] == ss63

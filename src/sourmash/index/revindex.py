@@ -127,15 +127,25 @@ class RevIndex(RustObject, Index):
         threshold = threshold_bp / (len(query.minhash) * self.scaled)
 
         results = []
+        size = ffi.new("uintptr_t *")
         results_ptr = self._methodcall(
-            lib.lcadb_gather, query._get_objptr(), threshold, True, True
+            lib.revindex_gather, query._get_objptr(), threshold, True, True, size
         )
-        if results_ptr != ffi.NULL:
-            match = SearchResult._from_objptr(results_ptr)
-            if match.score:
+        size = size[0]
+        if size == 0:
+            return []
+
+        results = []
+        for i in range(size):
+            match = SearchResult._from_objptr(results_ptr[i])
+            if match.score >= threshold:
                 results.append((match.score, match.signature, match.filename))
 
         return results
+
+    @property
+    def scaled(self):
+        return self._methodcall(lib.revindex_scaled)
 
 
 class SearchResult(RustObject):

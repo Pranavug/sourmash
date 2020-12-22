@@ -356,6 +356,7 @@ impl RevIndex {
             let intersect_bp = (match_mh.scaled() as u64 * intersect_orig) as usize;
 
             let f_unique_to_query = intersect_orig as f64 / query.size() as f64;
+            let match_ = match_mh.clone();
 
             // TODO: all of these
             let f_unique_weighted = 0.;
@@ -363,7 +364,6 @@ impl RevIndex {
             let median_abund = 0;
             let std_abund = 0;
             let md5 = "".into();
-            let match_ = match_path.to_str().unwrap().into();
             let f_match_orig = 0.;
             let remaining_bp = 0;
 
@@ -460,7 +460,7 @@ impl RevIndex {
         */
 
         // TODO: proper threshold calculation
-        let threshold: usize = (threshold * (mh.scaled() as f64)) as _;
+        let threshold: usize = (threshold * (mh.size() as f64)) as _;
 
         let counter = self.counter_for_query(&mh);
 
@@ -534,7 +534,7 @@ pub struct GatherResult {
     name: String,
 
     md5: String,
-    match_: String,
+    match_: KmerMinHash,
     f_match_orig: f64,
     unique_intersect_bp: usize,
     gather_result_rank: usize,
@@ -542,7 +542,7 @@ pub struct GatherResult {
 }
 
 impl GatherResult {
-    pub fn get_match(&self) -> String {
+    pub fn get_match(&self) -> KmerMinHash {
         self.match_.clone()
     }
 }

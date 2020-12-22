@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::slice;
 
 use crate::index::greyhound::RevIndex;
-use crate::signature::Signature;
+use crate::signature::{Signature, SigsTrait};
 use crate::sketch::minhash::KmerMinHash;
 use crate::sketch::Sketch;
 
@@ -92,14 +92,10 @@ unsafe fn revindex_search(
         unimplemented!()
     };
 
-    let mut results: Vec<(f64, Signature, String)> = revindex
-        .find_signatures(mh, threshold, do_containment, false)?
+    let results: Vec<(f64, Signature, String)> = revindex
+        .find_signatures(mh, threshold, do_containment, true)?
         .into_iter()
         .collect();
-    results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-
-    //let results = lca_db.search(sig, threshold, do_containment);
-    //todo!("convert results vec to... something");
 
     // FIXME: use the ForeignObject trait, maybe define new method there...
     let ptr_sigs: Vec<*const SourmashSearchResult> = results.into_iter().map(|x| {
@@ -118,14 +114,16 @@ unsafe fn revindex_gather(
     ptr: *const SourmashRevIndex,
     sig_ptr: *const SourmashSignature,
     threshold: f64,
-    do_containment: bool,
+    _do_containment: bool,
     _ignore_abundance: bool,
-) -> Result<*const SourmashSearchResult> {
+    size: *mut usize
+) -> Result<*const *const SourmashSearchResult> {
     let revindex = SourmashRevIndex::as_rust(ptr);
     let sig = SourmashSignature::as_rust(sig_ptr);
 
     if sig.signatures.is_empty() {
-        return Ok(std::ptr::null::<SourmashSearchResult>());
+        *size = 0;
+        return Ok(std::ptr::null::<*const SourmashSearchResult>());
     }
 
     let mh = if let Sketch::MinHash(mh) = &sig.signatures[0] {
@@ -135,15 +133,45 @@ unsafe fn revindex_gather(
         unimplemented!()
     };
 
-    let result: Option<(f64, Signature, String)> = revindex
-        .find_signatures(mh, threshold, do_containment, true)?
-        .first()
-        .cloned();
+    // TODO: proper threshold calculation
+    let threshold: usize = (threshold * (mh.size() as f64)) as _;
 
-    if let Some(result) = result {
-        Ok(SourmashSearchResult::from_rust(result))
-    } else {
-        Ok(std::ptr::null::<SourmashSearchResult>())
-    }
+    let counter = revindex.counter_for_query(&mh);
+        dbg!(&counter);
+
+    let results: Vec<(f64, Signature, String)> = revindex
+        .gather(counter, threshold, mh)
+        .unwrap() // TODO: proper error handling
+        .into_iter()
+        .map(|r| {
+            let filename = r.filename().to_owned();
+            let mut sig = Signature::from_path(&filename).unwrap().swap_remove(0);
+            sig.reset_sketches();
+            sig.push(Sketch::MinHash(r.get_match().clone()));
+
+            (r.f_match(), sig, filename)
+        })
+        .collect();
+
+
+    // FIXME: use the ForeignObject trait, maybe define new method there...
+    let ptr_sigs: Vec<*const SourmashSearchResult> = results.into_iter().map(|x| {
+      Box::into_raw(Box::new(x)) as *const SourmashSearchResult
+    }).collect();
+
+    let b = ptr_sigs.into_boxed_slice();
+    *size = b.len();
+
+    Ok(Box::into_raw(b) as *const *const SourmashSearchResult)
 }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn revindex_scaled(ptr: *const SourmashRevIndex) -> u64 {
+    let revindex = SourmashRevIndex::as_rust(ptr);
+    if let Sketch::MinHash(mh) = revindex.template() {
+        mh.scaled()
+    } else {
+        unimplemented!()
+    }
 }
