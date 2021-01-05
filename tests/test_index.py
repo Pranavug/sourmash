@@ -405,7 +405,10 @@ def test_revindex_index_search():
     ss47 = sourmash.load_one_signature(sig47)
     ss63 = sourmash.load_one_signature(sig63)
 
-    lidx = RevIndex([sig2, sig47, sig63], template=ss2.minhash)
+    lidx = RevIndex(template=ss2.minhash)
+    lidx.insert(ss2)
+    lidx.insert(ss47)
+    lidx.insert(ss63)
 
     # now, search for sig2
     sr = lidx.search(ss2, threshold=1.0)
@@ -446,7 +449,7 @@ def test_revindex_gather():
     ss47 = sourmash.load_one_signature(sig47)
     ss63 = sourmash.load_one_signature(sig63)
 
-    lidx = RevIndex([sig2, sig47, sig63], template=ss2.minhash)
+    lidx = RevIndex(template=ss2.minhash)
     lidx.insert(ss2)
     lidx.insert(ss47)
     lidx.insert(ss63)

@@ -384,37 +384,39 @@ impl Colors {
     /// Future optimization: store a count for each color, so we can track
     /// if there are extra colors that can be removed at the end.
     /// (the count is decreased whenever a new color has to be created)
-    pub fn update(
+    pub fn update<'a, I: IntoIterator<Item = &'a Idx>>(
         &mut self,
         current_color: Option<Color>,
-        new_idxs: &[Idx],
+        new_idxs: I,
     ) -> Result<Color, Error> {
-        let insert_new_color = |mut idxs: IdxTracker, colors: &mut ColorToIdx, new_idxs: &[Idx]| {
-            for new_idx in new_idxs {
-                idxs.insert(*new_idx);
-            }
-            let new_color = Colors::compute_color(&idxs);
-            colors.insert(new_color, idxs);
-            Ok(new_color)
-        };
-
         if let Some(color) = current_color {
             if let Some(idxs) = self.colors.get(&color) {
-                if new_idxs.iter().all(|new_idx| idxs.contains(&new_idx)) {
+                let idx_to_add: Vec<_> = new_idxs
+                    .into_iter()
+                    .filter(|new_idx| !idxs.contains(&new_idx))
+                    .collect();
+
+                if idx_to_add.is_empty() {
                     // Easy case, it already has all the new_idxs, so just return this color
                     Ok(color)
                 } else {
                     // We need to either create a new color,
                     // or find an existing color that have the same idxs
-                    let idxs = idxs.clone();
-                    insert_new_color(idxs, &mut self.colors, new_idxs)
+                    let mut idxs = idxs.clone();
+                    idxs.extend(idx_to_add.into_iter().cloned());
+                    let new_color = Colors::compute_color(&idxs);
+                    self.colors.insert(new_color, idxs);
+                    Ok(new_color)
                 }
             } else {
                 unimplemented!("throw error, current_color must exist in order to be updated")
             }
         } else {
-            let idxs = IdxTracker::default();
-            insert_new_color(idxs, &mut self.colors, new_idxs)
+            let mut idxs = IdxTracker::default();
+            idxs.extend(new_idxs.into_iter().cloned());
+            let new_color = Colors::compute_color(&idxs);
+            self.colors.insert(new_color, idxs);
+            Ok(new_color)
         }
     }
 
@@ -471,21 +473,22 @@ impl<'a> Iterator for Indices<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::iter::once;
 
     #[test]
     fn colors_update() {
         let mut colors = Colors::new();
 
-        let color = colors.update(None, &[1]).unwrap();
+        let color = colors.update(None, once(&1_u64)).unwrap();
         assert_eq!(colors.len(), 1);
 
         dbg!("update");
-        let new_color = colors.update(Some(color), &[1]).unwrap();
+        let new_color = colors.update(Some(color), once(&1_u64)).unwrap();
         assert_eq!(colors.len(), 1);
         assert_eq!(color, new_color);
 
         dbg!("upgrade");
-        let new_color = colors.update(Some(color), &[2]).unwrap();
+        let new_color = colors.update(Some(color), once(&2_u64)).unwrap();
         assert_eq!(colors.len(), 2);
         assert_ne!(color, new_color);
     }

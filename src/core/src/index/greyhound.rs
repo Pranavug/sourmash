@@ -24,6 +24,7 @@ type SigCounter = counter::Counter<Idx>;
 #[derive(Serialize, Deserialize)]
 pub struct RevIndex {
     hash_to_color: HashToColor,
+
     sig_files: Vec<PathBuf>,
 
     #[serde(skip)]
@@ -199,6 +200,99 @@ impl RevIndex {
         }
     }
 
+    pub fn new_with_sigs(
+        search_sigs: Vec<Signature>,
+        template: &Sketch,
+        threshold: usize,
+        queries: Option<&[KmerMinHash]>,
+    ) -> RevIndex {
+        unimplemented!()
+    }
+    /*
+        // If threshold is zero, let's merge all queries and save time later
+        let merged_query = if let Some(qs) = queries {
+            if threshold == 0 {
+                let mut merged = qs[0].clone();
+                for query in &qs[1..] {
+                    merged.merge(query).unwrap();
+                }
+                Some(merged)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let processed_sigs = AtomicUsize::new(0);
+
+        cfg_if! {
+          if #[cfg(feature = "parallel")] {
+            let (hash_to_color, colors) = search_sigs
+                .par_iter()
+                .enumerate()
+                .filter_map(|(dataset_id, sig)| {
+                    let i = processed_sigs.fetch_add(1, Ordering::SeqCst);
+                    if i % 1000 == 0 {
+                        info!("Processed {} reference sigs", i);
+                    }
+
+                    RevIndex::map_hashes_colors_sigs(
+                        dataset_id,
+                        sig,
+                        queries,
+                        &merged_query,
+                        threshold,
+                        template,
+                    )
+                })
+                .reduce(
+                    || {
+                        (
+                            HashToColor::with_hasher(BuildNoHashHasher::default()),
+                            Colors::default(),
+                        )
+                    },
+                    RevIndex::reduce_hashes_colors,
+                );
+          } else {
+            let (hash_to_color, colors) = search_sigs
+                .iter()
+                .enumerate()
+                .filter_map(|(dataset_id, filename)| {
+                    let i = processed_sigs.fetch_add(1, Ordering::SeqCst);
+                    if i % 1000 == 0 {
+                        info!("Processed {} reference sigs", i);
+                    }
+                    RevIndex::map_hashes_colors_sigs(
+                        dataset_id,
+                        filename,
+                        queries,
+                        &merged_query,
+                        threshold,
+                        template,
+                    )
+                })
+                .fold(
+                    (
+                        HashToColor::with_hasher(BuildNoHashHasher::default()),
+                        Colors::default(),
+                    ),
+                    RevIndex::reduce_hashes_colors,
+                );
+          }
+        }
+
+        RevIndex {
+            hash_to_color,
+            sig_files: search_sigs,
+            ref_sigs: search_sigs.into(),
+            template: template.clone(),
+            colors,
+        }
+    }
+    */
+
     fn map_hashes_colors(
         dataset_id: usize,
         filename: &PathBuf,
@@ -220,7 +314,9 @@ impl RevIndex {
 
         let mut hash_to_color = HashToColor::with_hasher(BuildNoHashHasher::default());
         let mut colors = Colors::default();
-        let color = colors.update(None, &[dataset_id as Idx]).unwrap();
+        let color = colors
+            .update(None, std::iter::once(&(dataset_id as Idx)))
+            .unwrap();
 
         let mut add_to = |matched_hashes: Vec<u64>, intersection| {
             if !matched_hashes.is_empty() || intersection > threshold as u64 {
@@ -265,21 +361,22 @@ impl RevIndex {
             };
 
         small_hashes.into_iter().for_each(|(hash, color)| {
-            let ids: Vec<_> = small_colors.indices(&color).cloned().collect();
-
-            let entry = large_hashes.entry(hash).or_insert_with(|| {
-                // In this case, the hash was not present yet.
-                // we need to create the same color from small_colors
-                // into large_colors.
-                let new_color = large_colors.update(None, ids.as_slice()).unwrap();
-                assert_eq!(new_color, color);
-                new_color
-            });
-
-            if *entry != color {
-                let new_color = large_colors.update(Some(*entry), ids.as_slice()).unwrap();
-                *entry = new_color;
-            }
+            large_hashes
+                .entry(hash)
+                .and_modify(|entry| {
+                    let ids = small_colors.indices(&color);
+                    let new_color = large_colors.update(Some(*entry), ids).unwrap();
+                    *entry = new_color;
+                })
+                .or_insert_with(|| {
+                    // In this case, the hash was not present yet.
+                    // we need to create the same color from small_colors
+                    // into large_colors.
+                    let ids = small_colors.indices(&color);
+                    let new_color = large_colors.update(None, ids).unwrap();
+                    assert_eq!(new_color, color);
+                    new_color
+                });
         });
 
         // Doing this outside reduce (at the end) uses more memory (since it

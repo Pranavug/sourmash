@@ -11,23 +11,45 @@ class RevIndex(RustObject, Index):
     __dealloc_func__ = lib.revindex_free
 
     def __init__(
-        self, signature_paths, template=None, threshold=0, queries=None, keep_sigs=False
+        self,
+        signature_paths=None,
+        template=None,
+        threshold=0,
+        queries=None,
+        keep_sigs=False,
     ):
-        attached_refs = weakref.WeakKeyDictionary()
+        self.template = template
+        self.threshold = threshold
+        self.queries = queries
+        self.keep_sigs = keep_sigs
+        self.signature_paths = signature_paths
+        self._signatures = []
 
-        search_sigs_ptr = ffi.NULL
-        sigs_size = 0
-        if signature_paths:
-            # get list of rust objects
-            collected = []
-            for path in signature_paths:
-                collected.append(encode_str(path))
-            search_sigs_ptr = ffi.new("SourmashStr*[]", collected)
-            sigs_size = len(signature_paths)
+        if signature_paths is None:
+            # delay initialization
+            self._objptr = ffi.NULL
+        else:
+            self._init_inner()
+
+    def _init_inner(self):
+        if self._objptr != ffi.NULL:
+            # Already initialized
+            return
+
+        if (
+            self.signature_paths is None
+            and not self._signatures
+            and self._objptr == ffi.NULL
+        ):
+            raise ValueError("No signatures provided")
+        elif (self.signature_paths or self._signatures) and self._objptr != ffi.NULL:
+            raise NotImplementedError("Need to update RevIndex")
+
+        attached_refs = weakref.WeakKeyDictionary()
 
         queries_ptr = ffi.NULL
         queries_size = 0
-        if queries:
+        if self.queries:
             # get list of rust objects
             collected = []
             for obj in queries:
@@ -38,22 +60,48 @@ class RevIndex(RustObject, Index):
             queries_size = len(queries)
 
         template_ptr = ffi.NULL
-        if template:
-            if isinstance(template, MinHash):
-                template_ptr = template._get_objptr()
+        if self.template:
+            if isinstance(self.template, MinHash):
+                template_ptr = self.template._get_objptr()
             else:
                 raise ValueError("Template must be a MinHash")
 
-        self._objptr = rustcall(
-            lib.revindex_new,
-            search_sigs_ptr,
-            sigs_size,
-            template_ptr,
-            threshold,
-            queries_ptr,
-            queries_size,
-            keep_sigs,
-        )
+        search_sigs_ptr = ffi.NULL
+        sigs_size = 0
+        collected = []
+        if self.signature_paths:
+            for path in self.signature_paths:
+                collected.append(encode_str(path))
+            search_sigs_ptr = ffi.new("SourmashStr*[]", collected)
+            sigs_size = len(signature_paths)
+
+            self._objptr = rustcall(
+                lib.revindex_new_with_paths,
+                search_sigs_ptr,
+                sigs_size,
+                template_ptr,
+                self.threshold,
+                queries_ptr,
+                queries_size,
+                self.keep_sigs,
+            )
+        elif self._signatures:
+            # force keep_sigs=True, and pass SourmashSignature directly to RevIndex.
+            for sig in self._signatures:
+                collected.append(sig._get_objptr())
+            search_sigs_ptr = ffi.new("SourmashSignature*[]", collected)
+            sigs_size = len(self._signatures)
+
+            self._objptr = rustcall(
+                lib.revindex_new_with_sigs,
+                search_sigs_ptr,
+                sigs_size,
+                template_ptr,
+                self.threshold,
+                queries_ptr,
+                queries_size,
+                True,
+            )
 
     def signatures(self):
         pass
@@ -62,7 +110,7 @@ class RevIndex(RustObject, Index):
         pass
 
     def insert(self, node):
-        pass
+        self._signatures.append(node)
 
     def save(self, path):
         pass
@@ -72,7 +120,14 @@ class RevIndex(RustObject, Index):
         pass
 
     def select(self, ksize=None, moltype=None):
-        pass
+        if self.template:
+            if ksize:
+                self.template.ksize = ksize
+            if moltype:
+                self.template.moltype = moltype
+        else:
+            # TODO: deal with None/default values
+            self.template = MinHash(ksize=ksize, moltype=moltype)
 
     def search(self, query, *args, **kwargs):
         """Return set of matches with similarity above 'threshold'.
@@ -95,6 +150,8 @@ class RevIndex(RustObject, Index):
         threshold = kwargs["threshold"]
         do_containment = kwargs.get("do_containment", False)
         ignore_abundance = kwargs.get("ignore_abundance", False)
+
+        self._init_inner()
 
         size = ffi.new("uintptr_t *")
         results_ptr = self._methodcall(
@@ -122,6 +179,8 @@ class RevIndex(RustObject, Index):
         "Return the match with the best Jaccard containment in the database."
         if not query.minhash:
             return []
+
+        self._init_inner()
 
         threshold_bp = kwargs.get("threshold_bp", 0.0)
         threshold = threshold_bp / (len(query.minhash) * self.scaled)
