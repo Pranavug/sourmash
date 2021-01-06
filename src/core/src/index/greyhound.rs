@@ -314,14 +314,13 @@ impl RevIndex {
 
         let mut hash_to_color = HashToColor::with_hasher(BuildNoHashHasher::default());
         let mut colors = Colors::default();
-        let color = colors
-            .update(None, std::iter::once(&(dataset_id as Idx)))
-            .unwrap();
+        let mut color = None;
 
         let mut add_to = |matched_hashes: Vec<u64>, intersection| {
             if !matched_hashes.is_empty() || intersection > threshold as u64 {
                 matched_hashes.into_iter().for_each(|hash| {
-                    hash_to_color.insert(hash, color);
+                    color = Some(colors.update(color, &[dataset_id as Idx]).unwrap());
+                    hash_to_color.insert(hash, color.unwrap());
                 });
             }
         };
@@ -383,8 +382,8 @@ impl RevIndex {
         // accumulates unused colors), but doesn't iterate over all
         // hashes/colors so frequently. For now keeping it here to
         // save memory
-        let used_colors: HashSet<_> = large_hashes.values().collect();
-        large_colors.retain(|color, _| used_colors.contains(color));
+        //let used_colors: HashSet<_> = large_hashes.values().collect();
+        //large_colors.retain(|color, _| used_colors.contains(color));
 
         (large_hashes, large_colors)
     }
@@ -648,6 +647,55 @@ impl GatherResult {
 mod test {
     use super::*;
 
+    use crate::sketch::minhash::max_hash_for_scaled;
+
     #[test]
-    fn greyhound_new() {}
+    fn greyhound_new() {
+        let max_hash = max_hash_for_scaled(10000);
+        let template = Sketch::MinHash(
+            KmerMinHash::builder()
+                .num(0u32)
+                .ksize(31)
+                .max_hash(max_hash)
+                .build(),
+        );
+        let search_sigs = [
+            "../../tests/test-data/gather/GCF_000006945.2_ASM694v2_genomic.fna.gz.sig".into(),
+            "../../tests/test-data/gather/GCF_000007545.1_ASM754v1_genomic.fna.gz.sig".into(),
+        ];
+        let index = RevIndex::new(&search_sigs, &template, 0, None, false);
+        assert_eq!(index.colors.len(), 3);
+    }
+
+    #[test]
+    fn greyhound_many() {
+        let max_hash = max_hash_for_scaled(10000);
+        let template = Sketch::MinHash(
+            KmerMinHash::builder()
+                .num(0u32)
+                .ksize(31)
+                .max_hash(max_hash)
+                .build(),
+        );
+        let search_sigs = [
+            "../../tests/test-data/gather/GCF_000006945.2_ASM694v2_genomic.fna.gz.sig".into(),
+            "../../tests/test-data/gather/GCF_000007545.1_ASM754v1_genomic.fna.gz.sig".into(),
+            "../../tests/test-data/gather/GCF_000008105.1_ASM810v1_genomic.fna.gz.sig".into(),
+        ];
+
+        let index = RevIndex::new(&search_sigs, &template, 0, None, false);
+        /*
+         dbg!(&index.colors.colors);
+         0: 86
+         1: 132
+         2: 91
+         (0, 1): 53
+         (0, 2): 90
+         (1, 2): 26
+         (0, 1, 2): 261
+         union: 739
+        */
+        //assert_eq!(index.colors.len(), 3);
+        assert_eq!(index.colors.len(), 7);
+    }
 }
