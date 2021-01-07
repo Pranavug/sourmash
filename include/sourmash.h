@@ -211,13 +211,20 @@ SourmashStr searchresult_filename(const SourmashSearchResult *ptr);
 
 SourmashSignature *searchresult_signature(const SourmashSearchResult *ptr);
 
-SourmashRevIndex *revindex_new(const SourmashStr *const *search_sigs_ptr,
-                               uintptr_t insigs,
-                               const SourmashKmerMinHash *template_ptr,
-                               uintptr_t threshold,
-                               const SourmashKmerMinHash *const *queries_ptr,
-                               uintptr_t inqueries,
-                               bool keep_sigs);
+SourmashRevIndex *revindex_new_with_paths(const SourmashStr *const *search_sigs_ptr,
+                                          uintptr_t insigs,
+                                          const SourmashKmerMinHash *template_ptr,
+                                          uintptr_t threshold,
+                                          const SourmashKmerMinHash *const *queries_ptr,
+                                          uintptr_t inqueries,
+                                          bool keep_sigs);
+
+SourmashRevIndex *revindex_new_with_sigs(const SourmashSignature *const *search_sigs_ptr,
+                                         uintptr_t insigs,
+                                         const SourmashKmerMinHash *template_ptr,
+                                         uintptr_t threshold,
+                                         const SourmashKmerMinHash *const *queries_ptr,
+                                         uintptr_t inqueries);
 
 void revindex_free(SourmashRevIndex *ptr);
 

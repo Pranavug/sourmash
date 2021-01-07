@@ -363,6 +363,9 @@ impl RevIndex {
             large_hashes
                 .entry(hash)
                 .and_modify(|entry| {
+                    // Hash is already present.
+                    // Update the current color by adding the indices from
+                    // small_colors.
                     let ids = small_colors.indices(&color);
                     let new_color = large_colors.update(Some(*entry), ids).unwrap();
                     *entry = new_color;
@@ -377,13 +380,6 @@ impl RevIndex {
                     new_color
                 });
         });
-
-        // Doing this outside reduce (at the end) uses more memory (since it
-        // accumulates unused colors), but doesn't iterate over all
-        // hashes/colors so frequently. For now keeping it here to
-        // save memory
-        //let used_colors: HashSet<_> = large_hashes.values().collect();
-        //large_colors.retain(|color, _| used_colors.contains(color));
 
         (large_hashes, large_colors)
     }

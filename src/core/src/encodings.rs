@@ -439,7 +439,6 @@ impl Colors {
                     old_idxs.1 += 1;
                 })
                 .or_insert_with(|| (idxs.0, 1));
-            //self.colors.insert(new_color, idxs);
             Ok(new_color)
         }
     }
